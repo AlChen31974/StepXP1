@@ -31,7 +31,7 @@ Pensé pour jouer en standalone ou en esclave du clock Ableton Live (via IAC), a
 Installation des dépendances :
 
 ```bash
-pip install mido python-rtmidi customtkinter
+pip install -r requirements.txt
 ```
 
 ## Lancement
