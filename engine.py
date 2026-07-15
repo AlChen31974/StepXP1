@@ -322,6 +322,10 @@ class SequencerEngine:
                         self._reset_playhead(0)
                         self.playing = True
                         step_pulse = 0
+                        # Joue le step 0 tout de suite : sinon il fallait attendre
+                        # 6 pulses de plus (1/16ème de temps) avant la 1ère note,
+                        # d'où le décalage constant entendu par rapport à Ableton.
+                        self._tick()
                         print("▶ Départ quantisé !")
 
                 if self.playing and self._ableton_playing:
@@ -339,6 +343,7 @@ class SequencerEngine:
                     self._reset_playhead(0)
                     self._pending_start = False
                     self.playing = True
+                    self._tick()   # joue le step 0 dès le 'start', même raison que ci-dessus
                     print("↩ Start Ableton")
 
             elif msg.type == 'continue':
