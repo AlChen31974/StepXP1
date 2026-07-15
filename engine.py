@@ -57,8 +57,10 @@ BTN = {
     # Note editing (step sélectionné)
     "note_m_st":  (0,  10),    # Semitone − gauche → −1 demi-ton
     "note_p_st":  (0,  121),   # Semitone + gauche → +1 demi-ton
-    "note_m_oct": (1,  10),    # Semitone − droite → −1 octave
-    "note_p_oct": (1,  121),   # Semitone + droite → +1 octave
+    "note_m_oct": (1,  10),    # Semitone − droite → −1 octave (step sélectionné)
+    "note_p_oct": (1,  121),   # Semitone + droite → +1 octave (step sélectionné)
+    "pattern_oct_m": (1, 101),  # SHIFT + Semitone − droite → −1 octave (tout le pattern)
+    "pattern_oct_p": (1, 100),  # SHIFT + Semitone + droite → +1 octave (tout le pattern)
     # Longueur de pattern
     "len_8":      (1,  26),    # Master tempo droite
     "len_16":     (1,  88),    # Beat sync droite
@@ -463,6 +465,9 @@ class SequencerEngine:
                 self.set_step_note(self.selected_step,
                                    self.step_notes[self.selected_step] + delta)
 
+        elif btn == "pattern_oct_m": self.shift_pattern_octave(-12)
+        elif btn == "pattern_oct_p": self.shift_pattern_octave(+12)
+
         elif btn == "len_8":    self.set_length(8)
         elif btn == "len_16":   self.set_length(16)
         elif btn == "len_32":   self.set_length(32)
@@ -586,6 +591,15 @@ class SequencerEngine:
             for i in range(NUM_STEPS):
                 self.steps[i] = False
                 self._led(i, LED_OFF)
+
+    def shift_pattern_octave(self, delta: int):
+        """Décale la note de TOUS les steps du pattern actif d'une octave
+        (±12 demi-tons), actifs ou non, pour que les steps encore éteints
+        gardent la bonne octave si on les rallume ensuite."""
+        with self._lock:
+            for i in range(NUM_STEPS):
+                self.step_notes[i] = max(0, min(127, self.step_notes[i] + delta))
+            self._refresh_all_leds()
 
     def _step_weight(self, i: int) -> float:
         """Probabilité qu'un step soit actif selon sa position rythmique.
