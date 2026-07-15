@@ -95,6 +95,12 @@ BTN = {
 
 BTN_LOOKUP: dict[tuple[int, int], str] = {v: k for k, v in BTN.items()}
 
+# ── Encodeur central ───────────────────────────────────────────────────
+# Control Change relatif : value=1 → +1 cran, value=127 → −1 cran
+# (déterminé empiriquement avec test_encoder.py)
+ENCODER_CH      = 6
+ENCODER_CONTROL = 64
+
 # ── Mapping BEAT JUMP pads → index dans la gamme (0-31) ──────────────
 # Même layout physique que SAMPLER, mais notes 32-47
 BEATJUMP_TO_IDX: dict[tuple[int, int], int] = {}
@@ -142,6 +148,7 @@ class SequencerEngine:
         self._shift_held       = False   # SHIFT du XP1 maintenu
         self.midi_out_mode     = "BOTH"  # "IAC", "HW" ou "BOTH"
         self._pad_press_time: dict[int, float] = {}  # step → heure du note_on
+        self._held_step: int | None = None   # step SAMPLER actuellement tenu enfoncé (édition via encodeur)
         self.scale_root     = 0        # 0=C, 1=C#, ... 11=B
         self.scale_mode     = "Majeur"
 
@@ -369,6 +376,16 @@ class SequencerEngine:
                 self._handle_xp1(msg)
 
     def _handle_xp1(self, msg):
+        # Encodeur central : n'agit que si un pad SAMPLER est tenu enfoncé
+        if msg.type == 'control_change':
+            if msg.channel == ENCODER_CH and msg.control == ENCODER_CONTROL \
+                    and self._held_step is not None:
+                delta = 1 if msg.value == 1 else -1 if msg.value == 127 else 0
+                if delta:
+                    self.set_step_note(self._held_step,
+                                       self.step_notes[self._held_step] + delta)
+            return
+
         if msg.type not in ('note_on', 'note_off'):
             return
 
@@ -390,8 +407,11 @@ class SequencerEngine:
             step = PAD_TO_STEP[ch_note]
             if pressed:
                 self.selected_step = step
+                self._held_step = step   # tant que tenu : l'encodeur édite sa note
                 self._pad_press_time[step] = time.time()
             else:
+                if self._held_step == step:
+                    self._held_step = None
                 # note_off : court appui = toggle, long appui = sélection seule
                 held = time.time() - self._pad_press_time.pop(step, time.time())
                 if held < 0.35:

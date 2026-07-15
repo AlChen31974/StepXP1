@@ -86,12 +86,10 @@ SIDE_BUTTONS = {
 # ── Centre ────────────────────────────────────────────────────────────
 CENTER = {
     "shift":        dict(ch=6, note=64),   # Ch7 = ch=6
-    # encodeur rotatif → envoie probablement des CC, pas des notes
-    # à vérifier avec un script CC
+    "encodeur":     dict(ch=6, control=64),   # CC relatif : value=1 → +1 cran, value=127 → −1 cran
 }
 
 # ── À CONFIRMER / INCONNU ─────────────────────────────────────────────
 # Ch7 Note 65 = INT centre ? (à tester)
 # Ch5/Ch6 Note 73 = origine inconnue (FX LEVEL fader ? à vérifier)
-# Encodeur rotatif central = probablement CC (pas capté par note_on)
 # Faders FX LEVEL = probablement CC
