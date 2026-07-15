@@ -93,6 +93,13 @@ BTN = {
     "pattern_3":  (5,  112),   # SLIDE FX 1 droite
     "pattern_4":  (5,  113),   # SLIDE FX 2 droite
     "pattern_5":  (5,  114),   # SLIDE FX 3 droite
+    # SHIFT + pattern → copie le pattern actif dans la cible + bascule dessus
+    "pattern_copy_0": (4, 115),   # SHIFT + SLIDE FX 1 gauche
+    "pattern_copy_1": (4, 116),   # SHIFT + SLIDE FX 2 gauche
+    "pattern_copy_2": (4, 117),   # SHIFT + SLIDE FX 3 gauche
+    "pattern_copy_3": (5, 115),   # SHIFT + SLIDE FX 1 droite
+    "pattern_copy_4": (5, 116),   # SHIFT + SLIDE FX 2 droite
+    "pattern_copy_5": (5, 117),   # SHIFT + SLIDE FX 3 droite
 }
 
 BTN_LOOKUP: dict[tuple[int, int], str] = {v: k for k, v in BTN.items()}
@@ -495,6 +502,9 @@ class SequencerEngine:
         elif btn == "out_hw":   self.midi_out_mode = "HW";   print("→ Sortie : HW")
         elif btn == "out_both": self.midi_out_mode = "BOTH"; print("→ Sortie : BOTH")
 
+        elif btn.startswith("pattern_copy_"):
+            self.copy_to_pattern(int(btn.split("_")[2]))
+
         elif btn.startswith("pattern_"):
             self.set_pattern(int(btn.split("_")[1]))
 
@@ -547,6 +557,17 @@ class SequencerEngine:
                     self.active_pattern = index
                     self._pending_pattern = None
                     self._refresh_all_leds()
+
+    def copy_to_pattern(self, target: int):
+        """Copie le pattern actif (steps + notes) dans le pattern `target`,
+        puis bascule dessus (comme set_pattern : immédiat, ou quantisé si
+        lecture en cours)."""
+        if not (0 <= target < NUM_PATTERNS) or target == self.active_pattern:
+            return
+        with self._lock:
+            self.patterns[target]      = list(self.steps)
+            self.pattern_notes[target] = list(self.step_notes)
+            self.set_pattern(target)
 
     def set_step_note(self, index: int, note: int):
         with self._lock:
