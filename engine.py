@@ -157,7 +157,11 @@ class SequencerEngine:
         self._last_clock_time = 0.0
         self._last_lit_step: int | None = None   # dernier pad allumé en couleur playhead
         self._led_queue: queue.Queue = queue.Queue()   # (step, velocity) → _led_writer_loop
-        self._lock            = threading.Lock()
+        # RLock (verrou réentrant) : autorise un même thread à reprendre son
+        # propre verrou sans se bloquer (nécessaire car _handle_button, appelé
+        # sous verrou depuis _xp1_loop, appelle des méthodes qui prennent
+        # aussi le verrou quand elles sont appelées directement par la GUI).
+        self._lock            = threading.RLock()
 
         # ── Ports MIDI ────────────────────────────────────────────────
         xp1_in  = self._find("in",  "XP1")
@@ -467,22 +471,25 @@ class SequencerEngine:
     # ── API publique ──────────────────────────────────────────────────
 
     def toggle_step(self, index: int):
-        self.steps[index] = not self.steps[index]
-        # On protège l'affichage du curseur seulement pendant la lecture ;
-        # à l'arrêt, il n'y a pas de curseur actif donc on rafraîchit toujours.
-        if not self.playing or index != self.current_step:
-            self._led(index, self._step_led_velocity(index))
+        with self._lock:
+            self.steps[index] = not self.steps[index]
+            # On protège l'affichage du curseur seulement pendant la lecture ;
+            # à l'arrêt, il n'y a pas de curseur actif donc on rafraîchit toujours.
+            if not self.playing or index != self.current_step:
+                self._led(index, self._step_led_velocity(index))
 
     def toggle_play(self):
-        if self.playing:
-            self._handle_button("stop")
-        else:
-            self._handle_button("play")
+        with self._lock:
+            if self.playing:
+                self._handle_button("stop")
+            else:
+                self._handle_button("play")
 
     def panic(self):
         """Coupe toutes les notes sur toutes les sorties."""
-        self.playing = False
-        self._send_note_off()
+        with self._lock:
+            self.playing = False
+            self._send_note_off()
         for out in [self._iac_out, self._hw_out]:
             if out:
                 try:
@@ -500,26 +507,29 @@ class SequencerEngine:
         self.bpm = max(40, min(240, value))
 
     def set_pattern(self, index: int):
-        if 0 <= index < NUM_PATTERNS:
-            if self.playing:
-                # Quantisé : le nouveau pattern démarre à la fin de la boucle courante
-                self._pending_pattern = index
-            else:
-                # Pas en lecture : changement immédiat
-                self.active_pattern = index
-                self._pending_pattern = None
-                self._refresh_all_leds()
+        with self._lock:
+            if 0 <= index < NUM_PATTERNS:
+                if self.playing:
+                    # Quantisé : le nouveau pattern démarre à la fin de la boucle courante
+                    self._pending_pattern = index
+                else:
+                    # Pas en lecture : changement immédiat
+                    self.active_pattern = index
+                    self._pending_pattern = None
+                    self._refresh_all_leds()
 
     def set_step_note(self, index: int, note: int):
-        self.step_notes[index] = max(0, min(127, note))
-        if not self.playing or index != self.current_step:
-            self._led(index, self._step_led_velocity(index))
+        with self._lock:
+            self.step_notes[index] = max(0, min(127, note))
+            if not self.playing or index != self.current_step:
+                self._led(index, self._step_led_velocity(index))
 
     def set_length(self, length: int):
-        if length in (8, 16, 32):
-            self.pattern_length = length
-            if self.current_step >= length:
-                self._reset_playhead(0)
+        with self._lock:
+            if length in (8, 16, 32):
+                self.pattern_length = length
+                if self.current_step >= length:
+                    self._reset_playhead(0)
 
     def get_scale_notes(self, midi_min: int = 36, midi_max: int = 84) -> list[int]:
         """Retourne toutes les notes MIDI de la gamme entre midi_min et midi_max."""
@@ -532,28 +542,25 @@ class SequencerEngine:
 
     def _assign_scale_note(self, scale_index: int):
         """Joue la note scale_index et l'assigne à selected_step si un step est sélectionné."""
-        scale = self.get_scale_notes()
-        if not scale or scale_index >= len(scale):
-            return
-        note = scale[scale_index]
-        # Toujours jouer la note (feedback auditif)
-        self._midi_send(mido.Message('note_on',  channel=0, note=note, velocity=VELOCITY))
-        threading.Timer(0.2, lambda n=note: self._midi_send(
-            mido.Message('note_off', channel=0, note=n, velocity=0)
-        )).start()
-        # Assigner au step seulement si un step est sélectionné
-        if self.selected_step is not None:
-            self.set_step_note(self.selected_step, note)
-        # Joue la note pour feedback auditif
+        with self._lock:
+            scale = self.get_scale_notes()
+            if not scale or scale_index >= len(scale):
+                return
+            note = scale[scale_index]
+            # Assigner au step seulement si un step est sélectionné
+            if self.selected_step is not None:
+                self.set_step_note(self.selected_step, note)
+        # Feedback auditif : envoyé hors verrou (I/O MIDI, pas d'état partagé touché)
         self._midi_send(mido.Message('note_on',  channel=0, note=note, velocity=VELOCITY))
         threading.Timer(0.2, lambda n=note: self._midi_send(
             mido.Message('note_off', channel=0, note=n, velocity=0)
         )).start()
 
     def clear_pattern(self):
-        for i in range(NUM_STEPS):
-            self.steps[i] = False
-            self._led(i, LED_OFF)
+        with self._lock:
+            for i in range(NUM_STEPS):
+                self.steps[i] = False
+                self._led(i, LED_OFF)
 
     def _step_weight(self, i: int) -> float:
         """Probabilité qu'un step soit actif selon sa position rythmique.
@@ -666,27 +673,29 @@ class SequencerEngine:
         tout le pattern (avec variation) plutôt qu'un tirage indépendant partout :
         ça donne un groove reconnaissable au lieu d'un bruit rythmique sans forme.
         Notes générées selon le mode actif (basse ou mélodie)."""
-        scale = self.get_scale_notes(RANDOM_NOTE_MIN, RANDOM_NOTE_MAX)
-        motif_len = 4
-        motif = [random.random() < self._step_weight(i) for i in range(motif_len)]
-        for i in range(self.pattern_length):
-            base_on = motif[i % motif_len]
-            # 20% de chance d'inverser le step du motif à chaque répétition
-            self.steps[i] = (not base_on) if random.random() < 0.2 else base_on
-        if scale:
-            for i, note in self._generate_notes(scale).items():
-                self.step_notes[i] = note
-        self._refresh_all_leds()
+        with self._lock:
+            scale = self.get_scale_notes(RANDOM_NOTE_MIN, RANDOM_NOTE_MAX)
+            motif_len = 4
+            motif = [random.random() < self._step_weight(i) for i in range(motif_len)]
+            for i in range(self.pattern_length):
+                base_on = motif[i % motif_len]
+                # 20% de chance d'inverser le step du motif à chaque répétition
+                self.steps[i] = (not base_on) if random.random() < 0.2 else base_on
+            if scale:
+                for i, note in self._generate_notes(scale).items():
+                    self.step_notes[i] = note
+            self._refresh_all_leds()
 
     def randomize_notes(self):
         """Randomise les notes des steps actifs en place, selon le mode actif
         (basse : ancrages root/fifth + passage ; mélodie : contour + cadence)."""
-        scale = self.get_scale_notes(RANDOM_NOTE_MIN, RANDOM_NOTE_MAX)
-        if not scale:
-            return
-        for i, note in self._generate_notes(scale).items():
-            self.step_notes[i] = note
-        self._refresh_all_leds()
+        with self._lock:
+            scale = self.get_scale_notes(RANDOM_NOTE_MIN, RANDOM_NOTE_MAX)
+            if not scale:
+                return
+            for i, note in self._generate_notes(scale).items():
+                self.step_notes[i] = note
+            self._refresh_all_leds()
 
     @property
     def synced_to_ableton(self) -> bool:
