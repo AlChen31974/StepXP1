@@ -298,10 +298,18 @@ class SequencerEngine:
 
     def _clock_loop(self):
         while True:
+            if self._ableton_playing and time.time() - self._last_clock_time > CLOCK_TIMEOUT:
+                # Le clock externe a cessé d'arriver sans message 'stop' explicite
+                # (ex: Drumbrute, qui n'envoie pas de Stop MIDI) : on redonne la
+                # main au clock interne / aux commandes manuelles plutôt que de
+                # rester bloqué en attente indéfiniment.
+                self._ableton_playing = False
+                self._pending_start = False
+
             if not self.playing or self._ableton_playing:
-                # Pendant qu'Ableton pilote le clock, ce thread n'a rien à faire :
-                # on ralentit son réveil pour ne pas concurrencer le GIL avec
-                # _iac_loop (thread temps-réel qui lit le clock MIDI d'Ableton).
+                # Pendant qu'une source externe pilote le clock, ce thread n'a rien
+                # à faire : on ralentit son réveil pour ne pas concurrencer le GIL
+                # avec _external_clock_loop (thread temps-réel qui lit le clock MIDI).
                 time.sleep(0.02 if self._ableton_playing else 0.005)
                 continue
             dt = 60 / self.bpm / 4
