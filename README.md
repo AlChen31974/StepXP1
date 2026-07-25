@@ -20,7 +20,11 @@ Pensé pour jouer en standalone ou en esclave du clock Ableton Live (via IAC), a
 - Sélection de la sortie MIDI : IAC (Ableton), sortie hardware, ou les deux
 - Feedback visuel sur les pads du contrôleur (couleur selon le rôle harmonique de la note) + GUI desktop (CustomTkinter, dark mode)
 
-## Prérequis
+## Installation rapide (macOS, sans Python)
+
+Télécharger `StepSequencer-macOS.zip` depuis la [dernière release](https://github.com/AlChen31974/StepXP1/releases/latest), dézipper, double-cliquer sur `StepSequencer.app`.
+
+## Prérequis (pour lancer depuis le code source)
 
 - macOS (utilise le driver IAC pour la synchro Ableton)
 - Python 3.11
@@ -40,7 +44,14 @@ pip install -r requirements.txt
 python3 gui.py
 ```
 
-Sur macOS, un launcher `StepSequencer.app` est fourni pour lancer l'app d'un double-clic (sans icône Dock, voir `Info.plist`).
+Pour reconstruire le `.app` toi-même (via [py2app](https://py2app.readthedocs.io/)) :
+
+```bash
+pip install py2app
+python3 setup.py py2app
+```
+
+Le résultat est généré dans `dist/StepSequencer.app`.
 
 ## Configuration MIDI
 
