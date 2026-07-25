@@ -156,6 +156,7 @@ class SequencerEngine:
         self._ableton_playing  = False   # True seulement si transport Ableton tourne
         self._shift_held       = False   # SHIFT du XP1 maintenu
         self.midi_out_mode     = "BOTH"  # "IAC", "HW" ou "BOTH"
+        self.clock_source      = "IAC"   # "IAC" (Ableton) ou "HW" (ex: Drumbrute) — quelle entrée pilote le tempo
         self._pad_press_time: dict[int, float] = {}  # step → heure du note_on
         self._held_step: int | None = None   # step SAMPLER actuellement tenu enfoncé (édition via encodeur)
         self.scale_root     = 0        # 0=C, 1=C#, ... 11=B
@@ -185,12 +186,14 @@ class SequencerEngine:
         iac_in  = self._find("in",  "IAC")
         iac_out = self._find("out", "IAC")
         hw_out  = self._find("out", "PreSonus")
+        hw_in   = self._find("in",  "DrumBrute")  # clock hardware, branchée en USB direct (pas via le PreSonus)
 
         print(f"XP1 in  : {xp1_in}")
         print(f"XP1 out : {xp1_out}")
         print(f"IAC in  : {iac_in}")
         print(f"IAC out : {iac_out}")
         print(f"HW out  : {hw_out or 'non connecté'}")
+        print(f"HW in   : {hw_in or 'non connecté'}")
 
         if not iac_out:
             raise RuntimeError("IAC Driver introuvable en sortie")
@@ -200,6 +203,7 @@ class SequencerEngine:
         self._iac_in  = mido.open_input(iac_in)    if iac_in  else None
         self._iac_out = mido.open_output(iac_out)
         self._hw_out  = mido.open_output(hw_out)   if hw_out  else None
+        self._hw_in   = mido.open_input(hw_in)     if hw_in   else None
 
     def _midi_send(self, msg: mido.Message):
         """Envoie selon midi_out_mode : IAC, HW ou BOTH."""
@@ -229,7 +233,9 @@ class SequencerEngine:
         if self._xp1_in:
             threading.Thread(target=self._xp1_loop, daemon=True).start()
         if self._iac_in:
-            threading.Thread(target=self._iac_loop, daemon=True).start()
+            threading.Thread(target=self._external_clock_loop, args=(self._iac_in, "IAC"), daemon=True).start()
+        if self._hw_in:
+            threading.Thread(target=self._external_clock_loop, args=(self._hw_in, "HW"), daemon=True).start()
         print("Séquenceur prêt")
 
     def _led_writer_loop(self):
@@ -303,15 +309,22 @@ class SequencerEngine:
                 self._tick()
             time.sleep(dt)
 
-    # ── Thread clock IAC — pilote les steps depuis Ableton ───────────────
+    # ── Thread clock externe — pilote les steps depuis IAC (Ableton) ou HW (ex: Drumbrute) ──
 
-    def _iac_loop(self):
+    def _external_clock_loop(self, port, source: str):
+        """Lit le clock MIDI d'un port donné. N'agit que si `source` correspond
+        à self.clock_source (choisi par l'utilisateur) : les entrées IAC et HW
+        peuvent tourner en même temps sans jamais se marcher dessus, seule celle
+        sélectionnée pilote réellement le séquenceur."""
         step_pulse = 0   # avance d'un step tous les 6 pulses
         bar_pulse  = 0   # position dans la barre (0–95, soit 4 temps)
         quarter_pulse_count = 0    # compte les pulses jusqu'à une noire (24 = 1 noire)
         quarter_start_time  = None
 
-        for msg in self._iac_in:
+        for msg in port:
+            if self.clock_source != source:
+                continue
+
             if msg.type == 'clock':
                 now = time.time()
                 # BPM mesuré sur une noire entière (24 pulses) plutôt que sur
@@ -360,14 +373,14 @@ class SequencerEngine:
                     self._pending_start = False
                     self.playing = True
                     self._tick()   # joue le step 0 dès le 'start', même raison que ci-dessus
-                    print("↩ Start Ableton")
+                    print(f"↩ Start ({source})")
 
             elif msg.type == 'continue':
                 self._ableton_playing = True
                 with self._lock:
                     if not self.playing:
                         self.playing = True
-                        print("↩ Continue Ableton")
+                        print(f"↩ Continue ({source})")
 
             elif msg.type == 'stop':
                 step_pulse = 0
@@ -545,6 +558,10 @@ class SequencerEngine:
 
     def set_bpm(self, value: int):
         self.bpm = max(40, min(240, value))
+
+    def set_clock_source(self, source: str):
+        if source in ("IAC", "HW"):
+            self.clock_source = source
 
     def set_pattern(self, index: int):
         with self._lock:
