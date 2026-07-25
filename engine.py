@@ -50,10 +50,10 @@ BTN = {
     "play":       (0,  115),   # INT gauche
     "stop":       (1,  115),   # INT droite
     # BPM
-    "bpm_m1":     (0,  38),    # Page ◄ gauche  → BPM −1
-    "bpm_p1":     (0,  46),    # Page ► gauche  → BPM +1
-    "bpm_m5":     (1,  38),    # Page ◄ droite  → BPM −5
-    "bpm_p5":     (1,  46),    # Page ► droite  → BPM +5
+    "bpm_m1":     (0,  39),    # Page ◄ gauche  → BPM −1
+    "bpm_p1":     (0,  47),    # Page ► gauche  → BPM +1
+    "bpm_m5":     (1,  39),    # Page ◄ droite  → BPM −5
+    "bpm_p5":     (1,  47),    # Page ► droite  → BPM +5
     # Note editing (step sélectionné)
     "note_m_st":  (0,  10),    # Semitone − gauche → −1 demi-ton
     "note_p_st":  (0,  121),   # Semitone + gauche → +1 demi-ton
@@ -324,7 +324,7 @@ class SequencerEngine:
                     elapsed = now - quarter_start_time
                     if 0 < elapsed < 2.0:
                         raw = 60 / elapsed
-                        self.bpm = round(self.bpm * 0.7 + raw * 0.3)
+                        self.set_bpm(round(self.bpm * 0.7 + raw * 0.3))
                     quarter_start_time = now
                     quarter_pulse_count = 0
                 self._last_clock_time = now
